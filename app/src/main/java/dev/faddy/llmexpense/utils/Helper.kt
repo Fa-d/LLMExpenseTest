@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
+import androidx.compose.runtime.staticCompositionLocalOf
 import dev.faddy.llmexpense.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,13 +15,23 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Paths
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import androidx.navigation.NavController
+import dev.faddy.llmexpense.MainViewModel
 
 
-fun checkGGUFFile(uri: Uri, context: Context): Boolean {
-    context.contentResolver.openInputStream(uri)?.use { inputStream ->
-        val ggufMagicNumberBytes = ByteArray(4)
-        inputStream.read(ggufMagicNumberBytes)
-        return ggufMagicNumberBytes.contentEquals(byteArrayOf(71, 71, 85, 70))
+fun checkGGUFFile(uri: Uri, context: Context, isContent: Boolean = false): Boolean {
+    if (isContent) {
+        context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            val ggufMagicNumberBytes = ByteArray(4)
+            inputStream.read(ggufMagicNumberBytes)
+            return ggufMagicNumberBytes.contentEquals(byteArrayOf(71, 71, 85, 70))
+        }
+    } else {
+        if (uri.path?.endsWith(".gguf") == true) {
+            return true
+        }
     }
     return false
 }
@@ -59,16 +70,15 @@ fun copyModelFile(
 }
 
 fun JSONObject.toMap(): Map<String, *> = keys().asSequence().associateWith {
-    when (val value = this[it])
-    {
-        is JSONArray ->
-        {
+    when (val value = this[it]) {
+        is JSONArray -> {
             val map = (0 until value.length()).associate { Pair(it.toString(), value[it]) }
             JSONObject(map).toMap().values.toList()
         }
+
         is JSONObject -> value.toMap()
         JSONObject.NULL -> null
-        else            -> value
+        else -> value
     }
 }
 
@@ -118,3 +128,20 @@ val test = """
 
         Assistant (JSON Output Only):
 """.trimIndent()
+
+
+const val USER_PREFERENCES_NAME = "user_preferences"
+
+val Context.dataStore by preferencesDataStore(name = USER_PREFERENCES_NAME)
+
+object PreferencesKeys {
+    val SAVED_MODEL_PATH = stringPreferencesKey("saved_model_path")
+}
+
+val LocalNavController = staticCompositionLocalOf<NavController> {
+    throw IllegalStateException("No NavController provided")
+}
+
+val LocalMainVM = staticCompositionLocalOf<MainViewModel> {
+    throw IllegalStateException("No ContactViewModel provided")
+}

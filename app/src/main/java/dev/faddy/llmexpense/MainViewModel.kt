@@ -1,10 +1,13 @@
 package dev.faddy.llmexpense
 
 import android.app.Application
+import android.content.Context
 import android.util.Log
 import androidx.compose.ui.text.intl.Locale
 import androidx.compose.ui.text.toLowerCase
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import dev.faddy.llmexpense.data.AppDatabase
 import dev.faddy.llmexpense.data.ExpenseRecord
@@ -26,10 +29,19 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import kotlin.coroutines.CoroutineContext
 
-class MainViewModel(application: Application) : AndroidViewModel(application) {
+class MainViewModel(context: Context) : ViewModel() {
+
+    class Factory(private val context: Context) : ViewModelProvider.Factory {
+        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            if (modelClass.isAssignableFrom(MainViewModel::class.java)) {
+                @Suppress("UNCHECKED_CAST") return MainViewModel(context) as T
+            }
+            throw IllegalArgumentException("Unknown ViewModel class")
+        }
+    }
 
     private val expenseDao: ExpenseRecordDao =
-        AppDatabase.getDatabase(application).expenseRecordDao()
+        AppDatabase.getDatabase(context).expenseRecordDao()
     private val llmManager = LlmManager()
 
     private val _uiState = MutableStateFlow<UiState>(UiState.Idle)
@@ -86,9 +98,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
 
-    init {
-        initializeLlm("/data/user/0/dev.faddy.llmexpense/files/qwen1_5-0_5b-chat-q5_0.gguf")
-    }
+    /*  init {
+          initializeLlm("/data/user/0/dev.faddy.llmexpense/files/qwen1_5-0_5b-chat-q5_0.gguf")
+      }*/
 
     private fun createLlmPrompt(userQuestion: String): String {
 
@@ -174,8 +186,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         when (intent) {
             is UserIntent.ParsedLlmData -> {
                 val jsonObj = JSONObject(rawLlmResponse)
-                val map: Map<String, *> = jsonObj.toMap()["data"] as Map<String, *>
-                handleParsedLlmData(intent.action, map)
+                _uiState.value = UiState.ShowMessage(jsonObj.toString())
+                // handleParsedLlmData(intent.action, map)
             }
 
 
@@ -391,6 +403,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Function to initialize the LLM
     fun initializeLlm(modelPath: String) {
+        Log.e("TAG", "ModelSelectionScreen: $modelPath")
+
         val chatTemplate = runBlocking {
             val ggufReader = GGUFReader()
             ggufReader.load(modelPath)

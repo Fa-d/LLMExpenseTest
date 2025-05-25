@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.Interaction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,34 +36,69 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.node.Ref
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ActivityCompat.recreate
 import androidx.core.net.toUri
+import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 import dev.faddy.llmexpense.data.ExpenseRecord
 import dev.faddy.llmexpense.ui.components.createAlertDialog
+import dev.faddy.llmexpense.ui.screens.ModelSelectionScreen
 import dev.faddy.llmexpense.ui.theme.LLMExpenseTheme
-import dev.faddy.llmexpense.utils.checkGGUFFile
-import dev.faddy.llmexpense.utils.copyModelFile
+import dev.faddy.llmexpense.utils.LocalMainVM
+import dev.faddy.llmexpense.utils.LocalNavController
+import dev.faddy.llmexpense.utils.PreferencesKeys
+
+import dev.faddy.llmexpense.utils.dataStore
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+
 
 class MainActivity : ComponentActivity() {
 
-    private val viewModel: MainViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         setContent {
-            LLMExpenseTheme {
-                AppScreen(viewModel = viewModel)
+            val context = LocalContext.current
+            val navController = rememberNavController()
+            val viewModel = MainViewModel.Factory(context).create(MainViewModel::class.java)
+            CompositionLocalProvider(
+                LocalNavController provides navController, LocalMainVM provides viewModel
+            ) {
+                LLMExpenseTheme {
+                    NavHost(
+                        modifier = Modifier.fillMaxSize(),
+                        navController = navController,
+                        startDestination = "modelSelectionScreen"
+                    ) {
+                        composable("modelSelectionScreen") { ModelSelectionScreen() }
+                        composable("ChatScreen") { AppScreen(viewModel = viewModel) }
+                    }
+
+                }
             }
         }
     }
@@ -73,7 +109,6 @@ class MainActivity : ComponentActivity() {
 fun AppScreen(viewModel: MainViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val allItems by viewModel.allExpenses.collectAsStateWithLifecycle(initialValue = emptyList())
-    var loadedPath by remember { mutableStateOf("") }
     var questionText by remember { mutableStateOf(TextFieldValue("add 4kg mango of 20 ")) }
     var selectedItem: ExpenseRecord? by remember { mutableStateOf(null) } // For update/delete UI
     LaunchedEffect(uiState) {
@@ -81,31 +116,11 @@ fun AppScreen(viewModel: MainViewModel) {
         viewModel.getUsedContextSize()
     }
     val context = LocalContext.current
-    val launcher =
-        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { activityResult ->
-            activityResult.data?.let {
-                it.data?.let { uri ->
-                    if (checkGGUFFile(uri, context)) {
-                        copyModelFile(uri, context, onComplete = { path ->
-                            loadedPath = path
-                            Log.e("TAG", "AppScreen: $path")
-                            Toast.makeText(context, "Model copied to $path", Toast.LENGTH_SHORT)
-                                .show()
-                        })
-                    } else {
-                        createAlertDialog(
-                            dialogTitle = "Invalid File",
-                            dialogText = "The selected file is not a valid GGUF file.",
-                            dialogPositiveButtonText = "OK",
-                            onPositiveButtonClick = {},
-                            dialogNegativeButtonText = null,
-                            onNegativeButtonClick = null,
-                        )
-                    }
-                }
-            }
-        }
+    val scope = rememberCoroutineScope()
 
+    var modelPath = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.SAVED_MODEL_PATH] ?: ""
+    }.collectAsState(initial = "").value
 
     Scaffold(
         topBar = {
@@ -140,45 +155,6 @@ fun AppScreen(viewModel: MainViewModel) {
             }
 
             Spacer(modifier = Modifier.height(8.dp))
-
-            // Action Buttons (for testing CRUD and LLM Init)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(onClick = {
-                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                        setType("application/octet-stream")
-                        putExtra(
-                            DocumentsContract.EXTRA_INITIAL_URI,
-                            Environment.getExternalStoragePublicDirectory(
-                                Environment.DIRECTORY_DOWNLOADS,
-                            ).toUri(),
-                        )
-                    }
-                    launcher.launch(intent)
-                }) {
-                    Text("Load LLM")
-                }
-                Button(
-                    onClick = {
-                        if (getModelPath(context)) {
-                            val modelPath =
-                                "/data/user/0/dev.faddy.llmexpense/files/i queried .gguf"
-                            viewModel.initializeLlm(modelPath)
-                        }
-                    }, modifier = Modifier.weight(1f)
-                ) {
-                    Text("Init LLM")
-                }
-                Button(
-                    onClick = {
-
-                    }, modifier = Modifier.weight(1f)
-                ) {
-                    Text("Insert Test Item")
-                }
-            }
 
 
             Spacer(modifier = Modifier.height(16.dp))

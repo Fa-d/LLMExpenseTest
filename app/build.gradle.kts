@@ -90,4 +90,6 @@ dependencies {
     implementation(libs.androidx.compose.navigation)
 
     implementation ("androidx.core:core-ktx:1.16.0")
+    implementation ("androidx.datastore:datastore-preferences:1.1.7")
+
 }
