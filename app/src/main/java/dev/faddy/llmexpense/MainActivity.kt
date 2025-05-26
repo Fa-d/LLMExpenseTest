@@ -73,6 +73,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import dev.faddy.llmexpense.ui.screens.ChatScreen
 
 
 class MainActivity : ComponentActivity() {
@@ -95,7 +96,7 @@ class MainActivity : ComponentActivity() {
                         startDestination = "modelSelectionScreen"
                     ) {
                         composable("modelSelectionScreen") { ModelSelectionScreen() }
-                        composable("ChatScreen") { AppScreen(viewModel = viewModel) }
+                        composable("ChatScreen") { ChatScreen() }
                     }
 
                 }
@@ -104,154 +105,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AppScreen(viewModel: MainViewModel) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val allItems by viewModel.allExpenses.collectAsStateWithLifecycle(initialValue = emptyList())
-    var questionText by remember { mutableStateOf(TextFieldValue("add 4kg mango of 20 ")) }
-    var selectedItem: ExpenseRecord? by remember { mutableStateOf(null) } // For update/delete UI
-    LaunchedEffect(uiState) {
-
-        viewModel.getUsedContextSize()
-    }
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-
-    var modelPath = context.dataStore.data.map { preferences ->
-        preferences[PreferencesKeys.SAVED_MODEL_PATH] ?: ""
-    }.collectAsState(initial = "").value
-
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(title = { Text("LLM Room DB App") })
-        }) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .padding(paddingValues)
-                .padding(16.dp)
-                .fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = questionText,
-                    onValueChange = { questionText = it },
-                    label = { Text("Enter your question or command") },
-                    modifier = Modifier.weight(1f)
-                )
-                Button(onClick = {
-                    if (questionText.text.isNotBlank()) {
-                        viewModel.handleUserQuestion(questionText.text)
-                        questionText = TextFieldValue("") // Clear input after sending
-                    }
-                }) {
-                    Text("Ask LLM")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
 
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text("used Context Size:" + viewModel.usedContextSize.collectAsState().value)
-            Spacer(modifier = Modifier.height(16.dp))
-            when (uiState) {
-                is MainViewModel.UiState.Idle -> Text("Ready.")
-                is MainViewModel.UiState.Loading -> CircularProgressIndicator()
-                is MainViewModel.UiState.ShowError -> Text("Error: ${(uiState as MainViewModel.UiState.ShowError).message}")
-                is MainViewModel.UiState.ShowMessage -> Text("Message: ${(uiState as MainViewModel.UiState.ShowMessage).message}")
-                is MainViewModel.UiState.ShowItems -> {
-                    // Data is displayed below in the LazyColumn observing allItems
-                    Text("Displaying items from database:")
-                }
-
-                MainViewModel.UiState.ProcessingLlm -> Text("ProcessingLlm.")
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Display Database Items (Observing allItems Flow)
-            LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                items(items = allItems) { item ->
-                    ItemRow(item = item, onItemSelected = { selectedItem = it })
-                    Divider() // Optional divider between items
-                }
-            }
-
-            // Simple UI for Update/Delete selected item (Optional)
-            selectedItem?.let { item ->
-                AlertDialog(
-                    onDismissRequest = { selectedItem = null },
-                    title = { Text("Manage Item") },
-                    text = {
-                        Column {
-                            Text("Selected Item: ${item.itemName}")
-                            // Add fields to edit item properties if implementing update UI
-                        }
-                    },
-                    confirmButton = {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(onClick = {
-                                // TODO: Implement Update logic based on edited fields
-                                // viewModel.updateItem(updatedItem)
-                                selectedItem = null
-                            }) {
-                                Text("Update")
-                            }
-                            Button(onClick = {
-
-                                selectedItem = null
-                            }) {
-                                Text("Delete")
-                            }
-                        }
-                    },
-                    dismissButton = {
-                        Button(onClick = { selectedItem = null }) {
-                            Text("Cancel")
-                        }
-                    })
-            }
-        }
-    }
-}
-
-private fun RowScope.getModelPath(context: Context): Boolean {
-
-    var isAvailable = false
-    context.filesDir.listFiles()?.forEach { file ->
-        if (file.isFile && file.name.endsWith(".gguf")) {
-            isAvailable = true
-        }
-    }
-    if (!isAvailable) {
-        Toast.makeText(context, "Model not available", Toast.LENGTH_SHORT).show()
-    }
-    return isAvailable
-}
-
-@Composable
-fun ItemRow(item: ExpenseRecord, onItemSelected: (ExpenseRecord) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp)
-            .clickable { onItemSelected(item) }, // Make row clickable to select item
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column {
-            Text(text = item.itemName, style = MaterialTheme.typography.bodyMedium)
-            Text(text = item.category, style = MaterialTheme.typography.bodySmall)
-        }
-        Text(text = "$${item.totalPrice}", style = MaterialTheme.typography.bodyMedium)
-    }
-}
 

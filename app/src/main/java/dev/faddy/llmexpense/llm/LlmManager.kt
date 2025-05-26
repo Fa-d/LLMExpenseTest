@@ -85,6 +85,9 @@ class LlmManager() {
         }
     }
 
+    fun resetContext() {
+        instance.getContextLengthUsed()
+    }
     fun getResponse(
         query: String,
         responseTransform: (String) -> String,

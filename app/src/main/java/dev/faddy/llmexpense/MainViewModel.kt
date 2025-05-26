@@ -40,8 +40,7 @@ class MainViewModel(context: Context) : ViewModel() {
         }
     }
 
-    private val expenseDao: ExpenseRecordDao =
-        AppDatabase.getDatabase(context).expenseRecordDao()
+    private val expenseDao: ExpenseRecordDao = AppDatabase.getDatabase(context).expenseRecordDao()
     private val llmManager = LlmManager()
 
     private val _uiState = MutableStateFlow<UiState>(UiState.Idle)
@@ -75,56 +74,42 @@ class MainViewModel(context: Context) : ViewModel() {
             UiState() // For messages from LLM or operations
     }
 
-    // Define possible intents derived from user questions
-    sealed class UserIntent {
-        object GetAllExpenses : UserIntent() // Renamed for clarity
-        data class GetItemsByCategory(val category: String) : UserIntent()
-        data class GetItemsAbovePrice(val minPrice: Double) : UserIntent()
-        data class SearchItemsByName(val name: String) : UserIntent()
-        data class InsertItem(val item: ExpenseRecord) : UserIntent()
-        data class UpdateItem(val item: ExpenseRecord) : UserIntent()
-        data class DeleteItemById(val id: Int) : UserIntent()
-        data class ParsedLlmData(val action: String, val data: Map<String, Any>) : UserIntent()
-        object DeleteAllItems : UserIntent()
-        data class OtherQuestion(val question: String, val rawLlmResponse: String) :
-            UserIntent() // For questions not directly querying DB or LLM errors
-
-        object Unknown : UserIntent()
-    }
-
 
     fun stopLlmResponseGeneration() {
         llmManager.stopResponseGeneration()
     }
 
 
-    /*  init {
-          initializeLlm("/data/user/0/dev.faddy.llmexpense/files/qwen1_5-0_5b-chat-q5_0.gguf")
-      }*/
-
     private fun createLlmPrompt(userQuestion: String): String {
 
         return """
-        System: You are a financial data processing assistant.
-        The user can tell you to insert multiple products in one sentence. 
-        Your task is to understand the user's request about their expenses and convert it into a structured JSON command.
-        The JSON command should have two main keys: "action" and "data".
-        
-        Possible "action" values are:
-        - "insert_expense": When the user wants to add a new expense.
-        - "other_question": For any other query not directly related to the above actions.
-        
-        For "insert_expense", the "data" object must contain:
-        - "itemName": String (e.g., "mangoes", "coffee")
-        - "category": String (e.g., "Groceries", "Beverages", "Utilities". If not specified, use "General")
-        - "quantity": Integer (e.g., 3, 1. If not specified, assume 1)
-        - "pricePerUnit": Double (e.g., 5.0, 75.20)
-        
-        For "other_question", the "data" object should contain: 
-        - "original_question": String (the user's original question)
-
-        If any required data for an action is missing, try to infer reasonably or set "action" to "other_question" and include the original query.
-        Only output the valid JSON object. Do not include any other text, explanations, or markdown.
+        System: You are a personal finance assistant. generate the required data in a structured JSON format.  Ensure the following guidelines are followed when creating JSON structures:
+    
+    
+       * Every response must contain a `status` field indicating whether the request was successful (`"success"`) or failed (`"error"`).
+       * Include a `message` field for any additional information or error messages.
+    
+       * **Expenses and Income Data** should be presented with the following keys:
+    
+         * `category`: Name of the category (e.g., "Groceries", "Dining Out").
+         * `total`: The total amount for the given category or time period (e.g., total expenses for a week).
+         * `date_range`: A field specifying the time period for which the data is relevant (e.g., "2025-05-01 to 2025-05-31").
+       
+       * **Transactions** should include:
+    
+         * `transaction_id`: Unique identifier for the transaction.
+         * `description`: Brief description of the transaction (e.g., "Supermarket purchase").
+         * `amount`: The amount spent or received.
+         * `category`: The category associated with the transaction.
+         * `date`: Date of the transaction in `YYYY-MM-DD` format.
+         * `payment_method`: (Optional) Payment method used (e.g., "Credit Card", "Cash").
+       
+       * **Insights** should include:
+    
+         * `insight_type`: Type of insight (e.g., "Spending Trend", "Budget Overrun").
+         * `description`: A detailed description of the insight.
+         * `value`: The numerical value or comparison (e.g., percentage or amount).
+         * `date_range`: The time period the insight applies to.
 
         
         User: $userQuestion
@@ -147,7 +132,7 @@ class MainViewModel(context: Context) : ViewModel() {
         llmManager.getResponse(
             query = fullPrompt, // Send the full, structured prompt
             responseTransform = { it }, onPartialResponseGenerated = { partialResponse ->
-                // Only show partial response if it's likely JSON or a message
+                Log.d("MainViewModel", "partialResponse Response: ${partialResponse}")
                 if (partialResponse.trim().startsWith("{") || _llmPartialResponse.value.trim()
                         .startsWith("{")
                 ) {
@@ -156,21 +141,10 @@ class MainViewModel(context: Context) : ViewModel() {
                     _llmPartialResponse.value = partialResponse
                 }
             }, onSuccess = { llmResponse ->
-                Log.d("MainViewModel", "LLM Raw Response: ${llmResponse.response}")
+                _uiState.value = UiState.ShowMessage(llmResponse.response)
                 usedContextSize.tryEmit(llmResponse.contextLengthUsed.toString())
-                _llmPartialResponse.value =
-                    llmResponse.response // Show final raw response for debugging
-
-                viewModelScope.launch {
-                    withContext(Dispatchers.IO) {
-                        val (intent, _) = interpretLlmJsonResponse(
-                            llmResponse.response, userQuestion
-                        )
-                        executeIntent(intent, llmResponse.response)
-                    }
-
-
-                }
+                _llmPartialResponse.value = llmResponse.response
+                executeIntent(llmResponse.response)
             }, onCancelled = {
                 _uiState.value = UiState.Idle
                 _llmPartialResponse.value = "LLM inference cancelled."
@@ -182,219 +156,11 @@ class MainViewModel(context: Context) : ViewModel() {
             })
     }
 
-    private suspend fun executeIntent(intent: UserIntent, rawLlmResponse: String) {
-        when (intent) {
-            is UserIntent.ParsedLlmData -> {
-                val jsonObj = JSONObject(rawLlmResponse)
-                _uiState.value = UiState.ShowMessage(jsonObj.toString())
-                // handleParsedLlmData(intent.action, map)
-            }
+    private fun executeIntent(rawLlmResponse: String) {
 
 
-            is UserIntent.OtherQuestion -> {
-                _uiState.value = UiState.ShowMessage("LLM: ${intent.rawLlmResponse}")
-                _llmPartialResponse.value = intent.rawLlmResponse
-            }
-
-            is UserIntent.Unknown -> {
-                _uiState.value =
-                    UiState.ShowError("Could not understand the request. Raw LLM output: $rawLlmResponse")
-            }
-            // Fallback for older direct intents if interpretLlmJsonResponse returns them (should be rare)
-            is UserIntent.GetAllExpenses -> {
-                _uiState.value = UiState.Idle // UI observes allExpenses
-                _llmPartialResponse.value = "Showing all expenses."
-            }
-
-            else -> {
-                _uiState.value =
-                    UiState.ShowError("Unhandled intent type. Raw LLM output: $rawLlmResponse")
-            }
-        }
-        if (intent !is UserIntent.OtherQuestion && intent !is UserIntent.ParsedLlmData) {
-            // For direct actions that don't rely on observing a flow for feedback
-            _uiState.value = UiState.Idle
-        }
     }
 
-
-    private suspend fun handleParsedLlmData(action: String, data: Map<String, *>) {
-        Log.d("MainViewModel", "Handling Action: $action, Data: $data")
-        when (action.toLowerCase(Locale.current)) {
-            "insert_expense" -> {
-                try {
-                    val itemName = data["itemName"] as? String ?: "Unknown Item"
-                    val category = data["category"] as? String ?: "General"
-                    val quantity = (data["quantity"] as? Number)?.toInt() ?: 1
-                    val pricePerUnit = (data["pricePerUnit"] as? Number)?.toDouble() ?: 0.0
-
-                    if (itemName != "Unknown Item" && pricePerUnit > 0.0) {
-                        val expenseRecord = ExpenseRecord(
-                            itemName = itemName,
-                            category = category,
-                            quantity = quantity,
-                            pricePerUnit = pricePerUnit,
-                            totalPrice = quantity * pricePerUnit
-                        )
-                        expenseDao.insertExpense(expenseRecord)
-                        _uiState.value = UiState.ShowMessage("Expense inserted: $itemName")
-                        _llmPartialResponse.value =
-                            "Inserted: $itemName ($quantity x $pricePerUnit = ${expenseRecord.totalPrice} Taka, Category: $category)"
-                    } else {
-                        _uiState.value =
-                            UiState.ShowError("Could not insert expense: Missing name or price.")
-                        _llmPartialResponse.value =
-                            "Failed to insert: Invalid data received from LLM."
-                    }
-                } catch (e: Exception) {
-                    Log.e("MainViewModel", "Error inserting expense from LLM data", e)
-                    _uiState.value = UiState.ShowError("Error inserting: ${e.message}")
-                    _llmPartialResponse.value = "Error processing insert request."
-                }
-            }
-
-            "insert_multiple_expenses" -> {
-                val itemsList = data["items"] as? List<Map<String, Any>>
-                if (itemsList.isNullOrEmpty()) {
-                    _uiState.value = UiState.ShowError("No items provided for multiple insertion.")
-                    _llmPartialResponse.value = "Failed to insert multiple: No item data from LLM."
-                    return
-                }
-                val insertedNames = mutableListOf<String>()
-                val failedItems = mutableListOf<String>()
-                itemsList.forEach { itemData ->
-                    try {
-                        val itemName = itemData["itemName"] as? String ?: "Unknown Item"
-                        val category = itemData["category"] as? String ?: "General"
-                        val quantity = (itemData["quantity"] as? Number)?.toInt() ?: 1
-                        val pricePerUnit = (itemData["pricePerUnit"] as? Number)?.toDouble() ?: 0.0
-
-                        if (itemName != "Unknown Item" && pricePerUnit > 0.0) {
-                            val expenseRecord = ExpenseRecord(
-                                itemName = itemName,
-                                category = category,
-                                quantity = quantity,
-                                pricePerUnit = pricePerUnit,
-                                totalPrice = quantity * pricePerUnit
-                            )
-                            expenseDao.insertExpense(expenseRecord)
-                            insertedNames.add("$itemName ($quantity x $pricePerUnit)")
-                        } else {
-                            failedItems.add(itemName)
-                        }
-                    } catch (e: Exception) {
-                        Log.e("MainViewModel", "Error processing one item in multiple insert", e)
-                        failedItems.add((itemData["itemName"] as? String) ?: "Unnamed Item")
-                    }
-                }
-                var message = "Inserted: ${insertedNames.joinToString()}. "
-                if (failedItems.isNotEmpty()) message += "Failed for: ${failedItems.joinToString()}."
-                _uiState.value =
-                    UiState.ShowMessage(message.take(100) + if (message.length > 100) "..." else "")
-                _llmPartialResponse.value = message
-            }
-
-            "get_all_expenses" -> {
-                // UI is already observing `allExpenses`. Message for clarity.
-                _uiState.value = UiState.Idle
-                _llmPartialResponse.value = "Showing all expenses."
-            }
-
-            "get_expenses_by_category" -> {
-                val category = data["category"] as? String
-                if (category != null) {
-                    // UI needs to observe a different flow or filter allExpenses
-                    // For now, just show a message.
-                    _uiState.value =
-                        UiState.ShowMessage("Filtering by category: $category (UI update needed)")
-                    _llmPartialResponse.value =
-                        "To see items in category '$category', please check the main list (filtering logic to be enhanced in UI)."
-                } else {
-                    _uiState.value = UiState.ShowError("Category not specified.")
-                }
-            }
-
-            "search_expenses_by_name" -> {
-                val nameQuery = data["nameQuery"] as? String
-                if (nameQuery != null) {
-                    _uiState.value =
-                        UiState.ShowMessage("Searching for: $nameQuery (UI update needed)")
-                    _llmPartialResponse.value =
-                        "To see items matching '$nameQuery', please check the main list (filtering logic to be enhanced in UI)."
-                } else {
-                    _uiState.value = UiState.ShowError("Search term not specified.")
-                }
-            }
-
-            "get_expenses_above_price" -> {
-                val minPrice = (data["minPrice"] as? Number)?.toDouble()
-                if (minPrice != null) {
-                    _uiState.value =
-                        UiState.ShowMessage("Filtering for expenses above $minPrice (UI update needed)")
-                    _llmPartialResponse.value =
-                        "To see items above $minPrice, please check the main list (filtering logic to be enhanced in UI)."
-                } else {
-                    _uiState.value = UiState.ShowError("Minimum price not specified.")
-                }
-            }
-
-            else -> {
-                _uiState.value = UiState.ShowError("Unknown action from LLM: $action")
-                _llmPartialResponse.value = "Received an unknown command: $action"
-            }
-        }
-        // Return to Idle unless an error state was already set or it's a continuous flow observation
-        if (_uiState.value !is UiState.ShowError) {
-            _uiState.value = UiState.Idle
-        }
-    }
-
-    // --- Interpret LLM JSON Response ---
-    private fun interpretLlmJsonResponse(
-        llmResponse: String, originalQuestion: String
-    ): Pair<UserIntent, Map<String, Any>> {
-        try {
-            // Attempt to find a valid JSON object within the response string
-            val jsonStartIndex = llmResponse.indexOfFirst { it == '{' }
-            val jsonEndIndex = llmResponse.indexOfLast { it == '}' }
-
-            if (jsonStartIndex != -1 && jsonEndIndex != -1 && jsonEndIndex > jsonStartIndex) {
-                val jsonString = llmResponse.substring(jsonStartIndex, jsonEndIndex + 1)
-                Log.d("MainViewModel", "Attempting to parse JSON: $jsonString")
-                val jsonObj = JSONObject(jsonString)
-                val action = jsonObj.optString("action")
-                val dataObj = jsonObj.optJSONObject("data")
-                val dataMap = mutableMapOf<String, Any>()
-
-                dataObj?.keys()?.forEach { key ->
-                    val value = dataObj.get(key)
-                    if (value is org.json.JSONArray) {
-                        val list = mutableListOf<Map<String, Any>>()
-                        for (i in 0 until value.length()) {
-                            if (value.get(i) is org.json.JSONObject) {
-                                val itemObj = value.getJSONObject(i)
-                                val itemMap =
-                                    itemObj.keys().asSequence().associateWith { itemObj.get(it) }
-                                list.add(itemMap)
-                            }
-                        }
-                        dataMap[key] = list
-                    } else {
-                        dataMap[key] = value
-                    }
-                }
-
-                if (action.isNotBlank()) {
-                    return Pair(UserIntent.ParsedLlmData(action, dataMap), dataMap)
-                }
-            }
-            Log.w("MainViewModel", "No valid JSON object found in LLM response or action is blank.")
-        } catch (e: Exception) { // Catch org.json.JSONException and other parsing errors
-            Log.e("MainViewModel", "Failed to parse LLM JSON response: $llmResponse", e)
-        }
-        // Fallback if JSON parsing fails or action is not recognized
-        return Pair(UserIntent.OtherQuestion(originalQuestion, llmResponse), emptyMap())
-    }
 
     fun getUsedContextSize(): String {
         return usedContextSize.value
@@ -404,7 +170,6 @@ class MainViewModel(context: Context) : ViewModel() {
     // Function to initialize the LLM
     fun initializeLlm(modelPath: String) {
         Log.e("TAG", "ModelSelectionScreen: $modelPath")
-
         val chatTemplate = runBlocking {
             val ggufReader = GGUFReader()
             ggufReader.load(modelPath)
@@ -413,10 +178,10 @@ class MainViewModel(context: Context) : ViewModel() {
 
         _uiState.value = UiState.Loading // Indicate LLM initialization is loading
         val initParams = SmolLMInitParams(
-            modelPath = modelPath, minP = 0.05f, // Example values - tune as needed
-            temperature = 1.5f, // Example values - tune as needed
+            modelPath = modelPath, minP = 0.05f,
+            temperature =  0.8f, // Example values - tune as needed
             storeChats = false, // Set based on whether you want LLM to remember chat history
-            contextSize = 2048L, // Example context size
+            contextSize = 32768L, // Example context size
             chatTemplate = chatTemplate, // Specify chat template if needed
             nThreads = Runtime.getRuntime().availableProcessors() - 2, // Use available threads
             useMmap = true, // Use memory mapping if possible

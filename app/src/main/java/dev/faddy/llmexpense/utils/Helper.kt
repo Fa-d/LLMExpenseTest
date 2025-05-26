@@ -21,18 +21,14 @@ import androidx.navigation.NavController
 import dev.faddy.llmexpense.MainViewModel
 
 
-fun checkGGUFFile(uri: Uri, context: Context, isContent: Boolean = false): Boolean {
-    if (isContent) {
-        context.contentResolver.openInputStream(uri)?.use { inputStream ->
-            val ggufMagicNumberBytes = ByteArray(4)
-            inputStream.read(ggufMagicNumberBytes)
-            return ggufMagicNumberBytes.contentEquals(byteArrayOf(71, 71, 85, 70))
-        }
-    } else {
-        if (uri.path?.endsWith(".gguf") == true) {
-            return true
-        }
+fun checkGGUFFile(uri: Uri, context: Context): Boolean {
+
+    context.contentResolver.openInputStream(uri)?.use { inputStream ->
+        val ggufMagicNumberBytes = ByteArray(4)
+        inputStream.read(ggufMagicNumberBytes)
+        return ggufMagicNumberBytes.contentEquals(byteArrayOf(71, 71, 85, 70))
     }
+
     return false
 }
 

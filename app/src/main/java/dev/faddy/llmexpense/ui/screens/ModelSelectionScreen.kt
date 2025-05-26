@@ -46,7 +46,7 @@ fun ModelSelectionScreen() {
         rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { activityResult ->
             activityResult.data?.let {
                 it.data?.let { uri ->
-                    if (checkGGUFFile(uri, context, true)) {
+                    if (checkGGUFFile(uri, context)) {
                         copyModelFile(uri, context, onComplete = { path ->
                             modelPath = path.toString()
                             scope.launch {
@@ -79,13 +79,8 @@ fun ModelSelectionScreen() {
     ) {
         if (modelPath.isNotEmpty()) {
             Log.e("TAG", "ModelSelectionScreen: $modelPath")
-
-            if (checkGGUFFile(modelPath.toUri(), context)) {
-                viewModel.initializeLlm(modelPath)
-                navController.navigate("ChatScreen")
-            } else {
-                Text("The selected file is corrupted, select again")
-            }
+            viewModel.initializeLlm(modelPath)
+            navController.navigate("ChatScreen")
         } else {
             Column {
                 Text("Select model to continue")
